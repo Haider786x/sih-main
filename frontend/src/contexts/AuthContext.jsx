@@ -1,28 +1,23 @@
-import { createContext, useContext, useState, useEffect } from 'react';
-import axios from 'axios';
+import { createContext, useContext, useState, useEffect } from "react";
+import axios from "axios";
 
 const AuthContext = createContext();
+export const useAuth = () => useContext(AuthContext);
 
-export const useAuth = () => {
-  const context = useContext(AuthContext);
-  if (!context) {
-    throw new Error('useAuth must be used within an AuthProvider');
-  }
-  return context;
-};
+const API_BASE_URL = "https://sih-besy.onrender.com";
 
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
-  const [token, setToken] = useState(localStorage.getItem('token'));
-  const [userRole, setUserRole] = useState(localStorage.getItem('userRole'));
+  const [token, setToken] = useState(localStorage.getItem("token"));
+  const [userRole, setUserRole] = useState(localStorage.getItem("userRole"));
   const [loading, setLoading] = useState(true);
 
-  // Set up axios defaults
+  // Attach/remove Authorization header whenever token changes
   useEffect(() => {
     if (token) {
-      axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+      axios.defaults.headers.common["Authorization"] = `Bearer ${token}`;
     } else {
-      delete axios.defaults.headers.common['Authorization'];
+      delete axios.defaults.headers.common["Authorization"];
     }
   }, [token]);
 
@@ -31,15 +26,18 @@ export const AuthProvider = ({ children }) => {
     const checkAuth = async () => {
       if (token) {
         try {
-          const response = await axios.get('http://localhost:5000/profile');
-          setUser(response.data);
-          // Set user role from localStorage if available
-          const storedRole = localStorage.getItem('userRole');
-          if (storedRole) {
-            setUserRole(storedRole);
-          }
-        } catch (error) {
-          console.error('Auth check failed:', error);
+          const res = await axios.get(`${API_BASE_URL}/profile`, {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          setUser(res.data);
+          // restore role from storage
+          const storedRole = localStorage.getItem("userRole");
+          if (storedRole) setUserRole(storedRole);
+        } catch (err) {
+          console.error(
+            "Auth check failed:",
+            err.response?.data || err.message
+          );
           logout();
         }
       }
@@ -48,93 +46,97 @@ export const AuthProvider = ({ children }) => {
     checkAuth();
   }, [token]);
 
+  // Login
   const login = async (email, password) => {
     try {
-      console.log('Attempting login with:', { email });
-      const response = await axios.post('http://localhost:5000/auth/login', {
+      const res = await axios.post(`${API_BASE_URL}/auth/login`, {
         email,
-        password
+        password,
       });
-      console.log('Login response:', response.data);
-      const { token: newToken, role } = response.data;
+
+      const { token: newToken, role } = res.data;
       setToken(newToken);
       setUserRole(role);
-      localStorage.setItem('token', newToken);
-      localStorage.setItem('userRole', role);
-      axios.defaults.headers.common['Authorization'] = `Bearer ${newToken}`;
-      
-      // Fetch user profile
-      const profileResponse = await axios.get('http://localhost:5000/profile');
-      console.log('Profile response:', profileResponse.data);
-      setUser(profileResponse.data);
+
+      localStorage.setItem("token", newToken);
+      localStorage.setItem("userRole", role);
+
+      // Fetch profile after login
+      const profileRes = await axios.get(`${API_BASE_URL}/profile`, {
+        headers: { Authorization: `Bearer ${newToken}` },
+      });
+      setUser(profileRes.data);
+
       return { success: true, role };
-    } catch (error) {
-      console.error('Login error:', error);
-      const errorData = error.response?.data;
-      return { 
-        success: false, 
-        error: errorData?.error || error.message || 'Login failed',
-        attemptsLeft: errorData?.attemptsLeft,
-        lockedUntil: errorData?.lockedUntil
+    } catch (err) {
+      console.error("Login error:", err.response?.data || err.message);
+      return {
+        success: false,
+        error: err.response?.data?.error || "Login failed",
       };
     }
   };
 
+  // Register
   const register = async (username, email, password, role) => {
     try {
-      console.log('Attempting registration with:', { username, email, role });
-      const response = await axios.post('http://localhost:5000/auth/register', {
+      const res = await axios.post(`${API_BASE_URL}/auth/register`, {
         username,
         email,
         password,
-        role
+        role,
       });
-      console.log('Registration response:', response.data);
-      return { success: true, role: response.data.role };
-    } catch (error) {
-      console.error('Registration error:', error);
-      return { 
-        success: false, 
-        error: error.response?.data?.error || error.message || 'Registration failed' 
+
+      // Unlike login, register doesn’t auto-login in your backend
+      return { success: true, role: res.data.role };
+    } catch (err) {
+      console.error("Registration error:", err.response?.data || err.message);
+      return {
+        success: false,
+        error: err.response?.data?.error || "Registration failed",
       };
     }
   };
 
+  // Logout
   const logout = () => {
     setToken(null);
     setUser(null);
     setUserRole(null);
-    localStorage.removeItem('token');
-    localStorage.removeItem('userRole');
-    delete axios.defaults.headers.common['Authorization'];
+    localStorage.removeItem("token");
+    localStorage.removeItem("userRole");
+    delete axios.defaults.headers.common["Authorization"];
   };
 
+  // Update profile
   const updateProfile = async (profileData) => {
     try {
-      const response = await axios.put('http://localhost:5000/profile', profileData);
-      setUser(response.data);
+      const res = await axios.put(`${API_BASE_URL}/profile`, profileData, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      setUser(res.data);
       return { success: true };
-    } catch (error) {
-      return { 
-        success: false, 
-        error: error.response?.data?.error || 'Profile update failed' 
+    } catch (err) {
+      return {
+        success: false,
+        error: err.response?.data?.error || "Profile update failed",
       };
     }
   };
 
-  const value = {
-    user,
-    token,
-    userRole,
-    login,
-    register,
-    logout,
-    updateProfile,
-    loading
-  };
-
   return (
-    <AuthContext.Provider value={value}>
+    <AuthContext.Provider
+      value={{
+        user,
+        token,
+        userRole,
+        login,
+        register,
+        logout,
+        updateProfile,
+        loading,
+      }}
+    >
       {children}
     </AuthContext.Provider>
   );
